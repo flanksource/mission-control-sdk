@@ -34,13 +34,39 @@ export function parameterDefaults(
 }
 
 function parameterDefault(parameter: PlaybookParameter): unknown {
-  if (parameter.type === "checkbox") {
+  const type = parameterType(parameter);
+  if (type === "boolean") {
     return parameter.default === true || parameter.default === "true";
   }
   if (parameter.default === undefined) return "";
+  if (type === "number") {
+    const value = finiteNumber(parameter.default);
+    if (value !== undefined) return value;
+  }
   if (typeof parameter.default === "string") return parameter.default;
   return JSON.stringify(parameter.default);
 }
+
+/** Mission Control marks number inputs with `properties.format: "number"`. */
+function parameterType(parameter: PlaybookParameter): "boolean" | "number" | "string" {
+  if (parameter.type === "checkbox") return "boolean";
+  return parameter.properties?.format === "number" ? "number" : "string";
+}
+
+/** `properties.format` values Clicky's JsonSchemaForm renders; others are Mission Control-only. */
+const FORM_FORMATS = new Set(["password", "date", "date-time", "textarea", "md"]);
+
+/** Mission Control `properties` keys translated into JSON Schema below rather than copied. */
+const TRANSLATED_PROPERTIES = new Set([
+  "format",
+  "options",
+  "multiline",
+  "regex",
+  "min",
+  "max",
+  "minLength",
+  "maxLength",
+]);
 
 export function parameterSchema(
   parameters: PlaybookParameter[],
@@ -61,14 +87,11 @@ function parameterProperty(parameter: PlaybookParameter): JsonSchemaProperty {
   const metadata = parameter.properties ?? {};
   const format = typeof metadata.format === "string" ? metadata.format : undefined;
   const options = normalizeOptions(metadata.options);
-  const type =
-    parameter.type === "checkbox"
-      ? "boolean"
-      : format === "number"
-        ? "number"
-        : "string";
+  const type = parameterType(parameter);
   const property: JsonSchemaProperty = {
-    ...metadata,
+    ...Object.fromEntries(
+      Object.entries(metadata).filter(([key]) => !TRANSLATED_PROPERTIES.has(key)),
+    ),
     type,
     title: parameter.label || parameter.name,
     ...(parameter.description ? { description: parameter.description } : {}),
@@ -77,6 +100,7 @@ function parameterProperty(parameter: PlaybookParameter): JsonSchemaProperty {
       : {}),
   };
 
+  if (type === "string" && format && FORM_FORMATS.has(format)) property.format = format;
   if (parameter.type === "secret") property.format = "password";
   if (
     parameter.type === "code" ||
@@ -149,12 +173,24 @@ export function requiredParametersPresent(
     });
 }
 
+/**
+ * Converts form values into Mission Control run params. The server applies the
+ * templated default to an omitted param but keeps an explicit "", so "" is sent
+ * only for a param that has a default, meaning the user cleared it on purpose.
+ */
 export function serializeParameters(
+  parameters: PlaybookParameter[],
   values: Record<string, unknown>,
 ): Record<string, string> {
+  const defaulted = new Set(
+    parameters
+      .filter((parameter) => parameter.default !== undefined && parameter.default !== "")
+      .map((parameter) => parameter.name),
+  );
   return Object.fromEntries(
     Object.entries(values).flatMap(([key, value]) => {
-      if (value === undefined || value === null || value === "") return [];
+      if (value === undefined || value === null) return [];
+      if (value === "") return defaulted.has(key) ? [[key, ""]] : [];
       if (typeof value === "object") return [[key, JSON.stringify(value)]];
       return [[key, String(value)]];
     }),

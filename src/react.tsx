@@ -235,8 +235,6 @@ function WorkloadPanelView({
     [workload, metrics],
   );
 
-  useEffect(() => () => logsRequest.current?.abort(), []);
-
   useLayoutEffect(() => {
     activeTargetToken.current = targetToken;
     selectedTargetToken.current = undefined;
@@ -253,6 +251,10 @@ function WorkloadPanelView({
     setRunError(undefined);
     setLogsOpen(false);
     setLogsState({ status: "loading" });
+    return () => {
+      activeTargetToken.current = Symbol("inactive-workload-panel");
+      logsRequest.current?.abort();
+    };
   }, [targetToken]);
 
   useEffect(() => {
@@ -364,7 +366,7 @@ function WorkloadPanelView({
       const response = await playbookClient.run({
         id: selectedPlaybook.id,
         ...(playbookConfigId ? { config_id: playbookConfigId } : {}),
-        params: serializeParameters(values),
+        params: serializeParameters(parameters, values),
       });
       if (activeTargetToken.current !== targetToken) return;
       onRunStarted?.(response, selectedPlaybook);
