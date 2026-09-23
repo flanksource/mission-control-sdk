@@ -133,6 +133,127 @@ const run = await pluginClient.playbooks.run({
 `list(configId)` asks Mission Control to apply target eligibility and permissions. Omit `configId`
 to list all playbooks visible to the current user.
 
+## React workload panel
+
+The optional React entry point displays CPU, memory, disk, state, history, and
+logs for an application-defined workload. It wraps Clicky's `WorkloadCard`,
+adding a backend-neutral loader contract, an actions menu, and a logs dialog.
+A workload has a stable `id` plus Clicky's card fields; it is not restricted to
+Kubernetes:
+
+```sh
+pnpm add @flanksource/plugin-ui-sdk @flanksource/clicky-ui @tanstack/react-query react react-dom
+```
+
+```tsx
+import "@flanksource/clicky-ui/styles.css";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  WorkloadPanel,
+  type WorkloadMetricLoader,
+} from "@flanksource/plugin-ui-sdk/react";
+
+const queryClient = new QueryClient();
+
+const loadMetric = (
+  metric: "cpu" | "memory",
+  measure: "usage" | "capacity",
+): WorkloadMetricLoader =>
+  ({ workload, range, signal }) =>
+    observability.loadSeries({
+      workloadId: workload.id,
+      metric,
+      measure,
+      range,
+      signal,
+    });
+
+<QueryClientProvider client={queryClient}>
+  <WorkloadPanel
+    workload={{
+      id: "production/payments-api",
+      name: "payments-api",
+      type: "EC2 instance",
+      metadata: [
+        { label: "Region", value: "eu-west-1" },
+        { label: "Instance", value: "i-0123456789" },
+      ],
+      status: { label: "running", health: "healthy" },
+    }}
+    metrics={{
+      cpu: {
+        usage: loadMetric("cpu", "usage"),
+        capacity: loadMetric("cpu", "capacity"),
+      },
+      memory: {
+        usage: loadMetric("memory", "usage"),
+        capacity: loadMetric("memory", "capacity"),
+      },
+    }}
+    actions={[{ label: "Restart", onSelect: () => restart("payments-api") }]}
+    logs={{
+      load: ({ workload, signal }) => observability.loadLogs(workload.id, { signal }),
+    }}
+  />
+</QueryClientProvider>
+```
+
+- **Workload.** Any `WorkloadCard` field works: a free-form `type` or a
+  Kubernetes `kind`, `icon`, `namespace`, `replicas`, `createdAt`, and
+  `metadata`. The status badge tone comes from `status.health`
+  (`healthy`, `warning`, `unhealthy`) or an explicit `status.tone`; the label
+  text never affects it.
+- **Metrics.** Loaders receive the workload, the selected range, and an
+  `AbortSignal`, and return `{ points: [{ at, value }] }`. They own
+  authentication, filtering, and backend queries, whether the source is
+  Prometheus, Clicky, a cloud API, or an in-memory collector. CPU values use
+  cores; memory and disk values use bytes. `capacity` may also be a fixed
+  number in the same unit.
+- **Caching.** Series are cached by workload `id` and metric, so an id must
+  always map to the same data sources.
+- **Actions.** `actions` items appear in the ⋯ menu before the built-in Logs
+  item.
+- **Styles.** Import `@flanksource/clicky-ui/styles.css` once at the app root;
+  without it the card, menu, and dialogs render unstyled.
+- **Query client.** The panel polls through react-query, so it needs a
+  `QueryClientProvider` from the host's `@tanstack/react-query` peer dependency.
+  Install a version satisfying the SDK and Clicky peer range (`^5.66.8`).
+
+For Clicky's `GET <baseUrl>/<metricId>?since=<range>` contract, use the supplied
+adapter. The metric id is fixed or derived from the workload, and named source
+units keep collector-specific conversion out of callers:
+
+```tsx
+import { createClickyMetricLoader } from "@flanksource/plugin-ui-sdk/react";
+
+const clickyMetric = createClickyMetricLoader({
+  baseUrl: "/api/v1/metrics",
+  fetcher: metricsFetcher,
+});
+const metricId = (dimension: string) => (workload: { name: string }) =>
+  `k8s.statefulset.${workload.name}.${dimension}`;
+
+<WorkloadPanel
+  workload={workload}
+  metrics={{
+    cpu: {
+      usage: clickyMetric(metricId("cpu.usage"), { unit: "millicores" }),
+      capacity: clickyMetric(metricId("cpu.limit"), { unit: "millicores" }),
+    },
+    memory: {
+      usage: clickyMetric(metricId("memory.usage"), { unit: "bytes" }),
+      capacity: clickyMetric(metricId("memory.limit"), { unit: "bytes" }),
+    },
+  }}
+/>
+```
+
+A custom `fetcher` receives the URL and `{ signal }`.
+
+The root client remains independent of React. React, ReactDOM, Clicky UI, and
+`@tanstack/react-query` are optional peer dependencies used only when importing
+the `/react` entry point.
+
 ## Types
 
 Important exported types:
