@@ -1,6 +1,6 @@
 {
   "name": "@flanksource/plugin-ui-sdk",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Browser UI SDK for Mission Control plugin tabs",
   "type": "module",
   "license": "Apache-2.0",
