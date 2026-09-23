@@ -17,6 +17,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -27,8 +31,35 @@
     "clean": "trash dist || true"
   },
   "devDependencies": {
+    "@flanksource/clicky-ui": "^0.3.40",
+    "@tanstack/react-query": "^5.103.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.1.16",
+    "jsdom": "^25.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.6"
+  },
+  "peerDependencies": {
+    "@flanksource/clicky-ui": "^0.3.40",
+    "@tanstack/react-query": "^5.66.8",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@flanksource/clicky-ui": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20"
