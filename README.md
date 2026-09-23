@@ -113,6 +113,26 @@ const pluginClient = createMissionControlPluginClient({
 
 Pass-through requires Mission Control cookies and CORS to support credentialed browser requests.
 
+## Playbooks
+
+The client exposes the Mission Control playbook discovery, parameter, and run APIs using the same
+base URL, connection mode, injected `fetch`, and credential policy as plugin operations:
+
+```ts
+const playbooks = await pluginClient.playbooks.list("config-123");
+const parameters = await pluginClient.playbooks.parameters(playbooks[0].id, {
+  config_id: "config-123",
+});
+const run = await pluginClient.playbooks.run({
+  id: playbooks[0].id,
+  config_id: "config-123",
+  params: { reason: "Operator requested restart" },
+});
+```
+
+`list(configId)` asks Mission Control to apply target eligibility and permissions. Omit `configId`
+to list all playbooks visible to the current user.
+
 ## Types
 
 Important exported types:
@@ -125,6 +145,7 @@ type QueryParams = Record<string, QueryValue | readonly QueryValue[]>;
 interface MissionControlPluginClient {
   mode: ConnectionMode;
   baseUrl: string;
+  playbooks: MissionControlPlaybooksClient;
   New(pluginRef: string, configId?: string): MissionControlPluginInstance;
 }
 
