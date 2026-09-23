@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DropdownMenu,
+  JsonSchemaForm,
   Loading,
   Modal,
   type DropdownMenuItem,
@@ -17,6 +18,20 @@ import {
   type WorkloadCardVariant,
   type WorkloadCardWorkload,
 } from "@flanksource/clicky-ui/data";
+import type {
+  MissionControlPlaybooksClient,
+  Playbook,
+  PlaybookParameter,
+  PlaybookRunResponse,
+} from "./index.js";
+import {
+  parameterDefaults,
+  parameterSchema,
+  playbookLabel,
+  requiredParametersPresent,
+  serializeParameters,
+  staticParameters,
+} from "./playbook-form.js";
 
 /**
  * This entry point owns the workload loader contract, the actions menu and
@@ -126,12 +141,19 @@ export type WorkloadPanelLogs = {
   title?: string;
 };
 
+export type WorkloadPanelPlaybooks = {
+  client: MissionControlPlaybooksClient;
+  configId?: string;
+  onRunStarted?: (response: PlaybookRunResponse, playbook: Playbook) => void;
+};
+
 export interface WorkloadPanelProps {
   workload: WorkloadDescriptor;
   metrics: WorkloadMetrics;
   logs?: WorkloadPanelLogs;
   /** Host-owned actions menu items, listed before the built-in Logs item. */
   actions?: DropdownMenuItem[];
+  playbooks?: WorkloadPanelPlaybooks;
   range?: string;
   refreshMs?: number;
   expandable?: boolean;
@@ -139,6 +161,8 @@ export interface WorkloadPanelProps {
   variant?: WorkloadCardVariant;
   className?: string;
 }
+
+type LoadState = "idle" | "loading" | "ready" | "error";
 
 type LogsState =
   | { status: "loading" }
@@ -174,6 +198,7 @@ function WorkloadPanelView({
   metrics,
   logs,
   actions,
+  playbooks,
   range = "1h",
   refreshMs = 5000,
   expandable = true,
@@ -181,16 +206,123 @@ function WorkloadPanelView({
   variant,
   className,
 }: WorkloadPanelProps) {
+  const [playbookState, setPlaybookState] = useState<LoadState>("idle");
+  const [availablePlaybooks, setAvailablePlaybooks] = useState<Playbook[]>([]);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<Playbook>();
+  const [parameters, setParameters] = useState<PlaybookParameter[]>([]);
+  const [parameterState, setParameterState] = useState<LoadState>("idle");
+  const [parameterError, setParameterError] = useState<string>();
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [runError, setRunError] = useState<string>();
   const [logsOpen, setLogsOpen] = useState(false);
   const [logsState, setLogsState] = useState<LogsState>({ status: "loading" });
+  const playbookClient = playbooks?.client;
+  const playbookConfigId = playbooks?.configId;
+  const onRunStarted = playbooks?.onRunStarted;
+  const targetToken = useMemo(
+    () => Symbol("workload-panel-target"),
+    [playbookClient, playbookConfigId, workload.id],
+  );
+  const activeTargetToken = useRef(targetToken);
+  const selectedTargetToken = useRef<symbol | undefined>(undefined);
+  const parameterTargetToken = useRef<symbol | undefined>(undefined);
+  const playbookLoadingTarget = useRef<symbol | undefined>(undefined);
+  const submittingTarget = useRef<symbol | undefined>(undefined);
   const logsRequest = useRef<AbortController | null>(null);
-
-  useEffect(() => () => logsRequest.current?.abort(), []);
-
   const cardMetrics = useMemo(
     () => toCardMetrics(workload, metrics),
     [workload, metrics],
   );
+
+  useEffect(() => () => logsRequest.current?.abort(), []);
+
+  useLayoutEffect(() => {
+    activeTargetToken.current = targetToken;
+    selectedTargetToken.current = undefined;
+    parameterTargetToken.current = undefined;
+    logsRequest.current?.abort();
+    setPlaybookState("idle");
+    setAvailablePlaybooks([]);
+    setSelectedPlaybook(undefined);
+    setParameters([]);
+    setParameterState("idle");
+    setParameterError(undefined);
+    setValues({});
+    setSubmitting(false);
+    setRunError(undefined);
+    setLogsOpen(false);
+    setLogsState({ status: "loading" });
+  }, [targetToken]);
+
+  useEffect(() => {
+    if (!selectedPlaybook || !playbookClient) return;
+    if (selectedTargetToken.current !== targetToken) return;
+    let cancelled = false;
+    const fallback = staticParameters(selectedPlaybook);
+    parameterTargetToken.current = undefined;
+    setParameterState("loading");
+    setParameterError(undefined);
+    setRunError(undefined);
+    setValues(parameterDefaults(fallback));
+
+    playbookClient
+      .parameters(
+        selectedPlaybook.id,
+        playbookConfigId ? { config_id: playbookConfigId } : {},
+      )
+      .then((resolved) => {
+        if (
+          cancelled ||
+          activeTargetToken.current !== targetToken ||
+          selectedTargetToken.current !== targetToken
+        ) {
+          return;
+        }
+        setParameters(resolved);
+        setValues(parameterDefaults(resolved));
+        parameterTargetToken.current = targetToken;
+        setParameterState("ready");
+      })
+      .catch((error: unknown) => {
+        if (
+          cancelled ||
+          activeTargetToken.current !== targetToken ||
+          selectedTargetToken.current !== targetToken
+        ) {
+          return;
+        }
+        setParameters(fallback);
+        setParameterError(errorMessage(error));
+        parameterTargetToken.current = targetToken;
+        setParameterState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playbookClient, playbookConfigId, selectedPlaybook, targetToken]);
+
+  const schema = useMemo(() => parameterSchema(parameters), [parameters]);
+
+  async function loadPlaybooks() {
+    if (!playbookClient || playbookLoadingTarget.current === targetToken) return;
+    playbookLoadingTarget.current = targetToken;
+    setPlaybookState("loading");
+    try {
+      const resolved = await playbookClient.list(playbookConfigId);
+      if (activeTargetToken.current !== targetToken) return;
+      setAvailablePlaybooks(resolved);
+      setPlaybookState("ready");
+    } catch {
+      if (activeTargetToken.current !== targetToken) return;
+      setPlaybookState("error");
+    } finally {
+      if (playbookLoadingTarget.current === targetToken) {
+        playbookLoadingTarget.current = undefined;
+      }
+    }
+  }
 
   async function openLogs() {
     if (!logs) return;
@@ -214,12 +346,87 @@ function WorkloadPanelView({
     setLogsOpen(false);
   }
 
-  const menuItems: DropdownMenuItem[] = [
-    ...(actions ?? []),
-    ...(logs
-      ? [{ label: "Logs", group: "View", onSelect: () => void openLogs() }]
-      : []),
-  ];
+  async function runSelectedPlaybook() {
+    if (
+      !selectedPlaybook ||
+      !playbookClient ||
+      selectedTargetToken.current !== targetToken ||
+      parameterTargetToken.current !== targetToken ||
+      (parameterState !== "ready" && parameterState !== "error") ||
+      submittingTarget.current === targetToken
+    ) {
+      return;
+    }
+    submittingTarget.current = targetToken;
+    setSubmitting(true);
+    setRunError(undefined);
+    try {
+      const response = await playbookClient.run({
+        id: selectedPlaybook.id,
+        ...(playbookConfigId ? { config_id: playbookConfigId } : {}),
+        params: serializeParameters(values),
+      });
+      if (activeTargetToken.current !== targetToken) return;
+      onRunStarted?.(response, selectedPlaybook);
+      selectedTargetToken.current = undefined;
+      parameterTargetToken.current = undefined;
+      setSelectedPlaybook(undefined);
+    } catch (error) {
+      if (activeTargetToken.current !== targetToken) return;
+      setRunError(errorMessage(error));
+    } finally {
+      if (submittingTarget.current === targetToken) {
+        submittingTarget.current = undefined;
+        if (activeTargetToken.current === targetToken) setSubmitting(false);
+      }
+    }
+  }
+
+  function closePlaybook() {
+    if (submitting) return;
+    selectedTargetToken.current = undefined;
+    parameterTargetToken.current = undefined;
+    setSelectedPlaybook(undefined);
+  }
+
+  const menuItems: DropdownMenuItem[] = [...(actions ?? [])];
+  if (logs) {
+    menuItems.push({
+      label: "Logs",
+      group: "View",
+      onSelect: () => void openLogs(),
+    });
+  }
+  if (playbooks) {
+    if (playbookState === "ready" && availablePlaybooks.length > 0) {
+      menuItems.push(
+        ...availablePlaybooks.map((playbook) => ({
+          label: playbookLabel(playbook),
+          ...(playbook.icon ? { icon: playbook.icon } : {}),
+          group: "Playbooks",
+          onSelect: () => {
+            selectedTargetToken.current = targetToken;
+            parameterTargetToken.current = undefined;
+            setSelectedPlaybook(playbook);
+          },
+        })),
+      );
+    } else {
+      menuItems.push({
+        label:
+          playbookState === "loading"
+            ? "Loading playbooks…"
+            : playbookState === "error"
+              ? "Retry loading playbooks"
+              : playbookState === "ready"
+                ? "No playbooks available"
+                : "Load playbooks",
+        group: "Playbooks",
+        disabled: playbookState === "loading" || playbookState === "ready",
+        onSelect: () => void loadPlaybooks(),
+      });
+    }
+  }
 
   return (
     <>
@@ -238,6 +445,11 @@ function WorkloadPanelView({
               align="right"
               menuLabel={`${workload.name} actions`}
               items={menuItems}
+              onOpenChange={(open: boolean) => {
+                if (open && playbookClient && playbookState === "idle") {
+                  void loadPlaybooks();
+                }
+              }}
               trigger={
                 <Button
                   type="button"
@@ -279,6 +491,68 @@ function WorkloadPanelView({
             </div>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={selectedPlaybook !== undefined}
+        onClose={closePlaybook}
+        title={
+          selectedPlaybook
+            ? `Run ${playbookLabel(selectedPlaybook)}`
+            : "Run playbook"
+        }
+        size="lg"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSelectedPlaybook();
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        >
+          {parameterState === "loading" ? (
+            <Loading label="Loading parameters" />
+          ) : (
+            <JsonSchemaForm
+              schema={schema}
+              value={values}
+              onChange={setValues}
+            />
+          )}
+          {parameterError ? (
+            <Callout variant="caution" title="Live parameters unavailable">
+              {parameterError}
+            </Callout>
+          ) : null}
+          {runError ? (
+            <Callout variant="caution" title="Playbook could not be started">
+              {runError}
+            </Callout>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closePlaybook}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              loading={submitting}
+              loadingLabel={submitting ? "Starting…" : undefined}
+              disabled={
+                submitting ||
+                parameterTargetToken.current !== targetToken ||
+                (parameterState !== "ready" && parameterState !== "error") ||
+                !requiredParametersPresent(parameters, values)
+              }
+            >
+              Run
+            </Button>
+          </div>
+        </form>
       </Modal>
     </>
   );

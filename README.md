@@ -148,12 +148,17 @@ pnpm add @flanksource/plugin-ui-sdk @flanksource/clicky-ui @tanstack/react-query
 ```tsx
 import "@flanksource/clicky-ui/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMissionControlClient } from "@flanksource/plugin-ui-sdk";
 import {
   WorkloadPanel,
   type WorkloadMetricLoader,
 } from "@flanksource/plugin-ui-sdk/react";
 
 const queryClient = new QueryClient();
+const client = createMissionControlClient({
+  mode: "proxy",
+  baseUrl: "/api/mission-control",
+});
 
 const loadMetric = (
   metric: "cpu" | "memory",
@@ -194,6 +199,7 @@ const loadMetric = (
     logs={{
       load: ({ workload, signal }) => observability.loadLogs(workload.id, { signal }),
     }}
+    playbooks={{ client: client.playbooks, configId: "config-123" }}
   />
 </QueryClientProvider>
 ```
@@ -249,6 +255,10 @@ const metricId = (dimension: string) => (workload: { name: string }) =>
 ```
 
 A custom `fetcher` receives the URL and `{ signal }`.
+
+Opening the three-dot menu discovers playbooks that Mission Control considers
+eligible for `configId`; selecting one resolves its parameters into Clicky's
+`JsonSchemaForm` before starting the run.
 
 The root client remains independent of React. React, ReactDOM, Clicky UI, and
 `@tanstack/react-query` are optional peer dependencies used only when importing
