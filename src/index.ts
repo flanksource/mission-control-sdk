@@ -6,6 +6,55 @@ export type ConnectionMode = "pass-through" | "proxy";
 
 export type PluginComponentType = "panel" | "table" | "timeseries" | "action";
 
+export type PlaybookParameter = {
+  name: string;
+  default?: unknown;
+  label?: string;
+  required?: boolean;
+  icon?: string;
+  description?: string;
+  type?: string;
+  properties?: Record<string, unknown> | null;
+  dependsOn?: string[];
+};
+
+export type Playbook = {
+  id: string;
+  namespace?: string;
+  name: string;
+  title?: string | null;
+  icon?: string | null;
+  description?: string | null;
+  category?: string | null;
+  parameters?: PlaybookParameter[] | unknown;
+  spec?: {
+    parameters?: PlaybookParameter[];
+    [key: string]: unknown;
+  } | null;
+};
+
+export type PlaybookRunTarget = {
+  config_id?: string;
+  component_id?: string;
+  check_id?: string;
+};
+
+export type PlaybookRunRequest = PlaybookRunTarget & {
+  id: string;
+  params?: Record<string, string>;
+};
+
+export type PlaybookRunResponse = {
+  run_id: string;
+  starts_at: string;
+};
+
+export type MissionControlPlaybooksClient = {
+  list(configId?: string): Promise<Playbook[]>;
+  parameters(playbookId: string, target?: PlaybookRunTarget): Promise<PlaybookParameter[]>;
+  run(request: PlaybookRunRequest): Promise<PlaybookRunResponse>;
+};
+
 export type PluginInvokeOptions = Omit<RequestInit, "body"> & {
   /** Use Mission Control's /proxy/:operation endpoint instead of /invoke/:operation. */
   proxy?: boolean;
@@ -21,6 +70,7 @@ export type MissionControlPluginClientOptions = {
 export type MissionControlPluginClient = {
   mode: ConnectionMode;
   baseUrl: string;
+  playbooks: MissionControlPlaybooksClient;
   New(pluginRef: string, configId?: string): MissionControlPluginInstance;
 };
 
@@ -76,6 +126,47 @@ export function createMissionControlPluginClient(
   return {
     mode,
     baseUrl,
+    playbooks: {
+      list(configId?: string): Promise<Playbook[]> {
+        return requestJSON<Playbook[]>(
+          missionControlURL(baseUrl, "/playbook/list", {
+            config_id: normalizeOptionalString(configId),
+          }),
+          undefined,
+          fetchImpl,
+          defaultCredentials,
+        );
+      },
+
+      async parameters(
+        playbookId: string,
+        target: PlaybookRunTarget = {},
+      ): Promise<PlaybookParameter[]> {
+        const id = requirePathSegment(playbookId, "playbookId");
+        const response = await requestJSON<{ params?: PlaybookParameter[] }>(
+          missionControlURL(baseUrl, `/playbook/${encodeURIComponent(id)}/params`),
+          {
+            method: "POST",
+            body: JSON.stringify({ id, ...target }),
+          },
+          fetchImpl,
+          defaultCredentials,
+        );
+        return response.params ?? [];
+      },
+
+      run(request: PlaybookRunRequest): Promise<PlaybookRunResponse> {
+        return requestJSON<PlaybookRunResponse>(
+          missionControlURL(baseUrl, "/playbook/run"),
+          {
+            method: "POST",
+            body: JSON.stringify(request),
+          },
+          fetchImpl,
+          defaultCredentials,
+        );
+      },
+    },
 
     New(pluginRef: string, configId?: string): MissionControlPluginInstance {
       const normalizedPluginRef = requirePathSegment(pluginRef, "pluginRef");
@@ -169,6 +260,38 @@ function pluginOperationURL(
   appendQuery(url.searchParams, args.query);
 
   return stripFallbackOrigin(url);
+}
+
+function missionControlURL(baseUrl: string, path: string, query?: QueryParams): string {
+  const url = new URL(joinURL(baseUrl, path), fallbackBaseURL());
+  appendQuery(url.searchParams, query);
+  return stripFallbackOrigin(url);
+}
+
+async function requestJSON<T>(
+  url: string,
+  init: RequestInit | undefined,
+  fetchImpl: typeof fetch | undefined,
+  credentials: RequestCredentials,
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("accept", "application/json");
+  if (init?.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  const response = await (fetchImpl ?? globalFetch())(url, {
+    ...init,
+    credentials: init?.credentials ?? credentials,
+    headers,
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).trim();
+    throw sdkError(
+      `${init?.method ?? "GET"} ${url} failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 }
 
 function appendQuery(searchParams: URLSearchParams, query?: QueryParams): void {
