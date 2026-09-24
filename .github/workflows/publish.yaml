@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  # Let pnpm request a short-lived GitHub OIDC token for npm trusted publishing
+  # and provenance, instead of using a long-lived NPM_TOKEN secret.
   id-token: write
 
 jobs:
