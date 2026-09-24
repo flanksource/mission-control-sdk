@@ -1,6 +1,6 @@
 {
   "name": "@flanksource/mission-control-sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browser SDK for Mission Control: playbooks, plugins and raw API access",
   "type": "module",
   "license": "Apache-2.0",
