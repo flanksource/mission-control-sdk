@@ -1,12 +1,12 @@
 {
-  "name": "@flanksource/plugin-ui-sdk",
-  "version": "0.1.11",
-  "description": "Browser UI SDK for Mission Control plugin tabs",
+  "name": "@flanksource/mission-control-sdk",
+  "version": "0.2.0",
+  "description": "Browser SDK for Mission Control: playbooks, plugins and raw API access",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/flanksource/plugin-ui-sdk.git"
+    "url": "https://github.com/flanksource/mission-control-sdk.git"
   },
   "files": [
     "dist",
@@ -19,8 +19,8 @@
       "import": "./dist/index.js"
     },
     "./react": {
-      "types": "./dist/react.d.ts",
-      "import": "./dist/react.js"
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
     }
   },
   "types": "./dist/index.d.ts",

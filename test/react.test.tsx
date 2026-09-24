@@ -9,7 +9,7 @@ import {
   createClickyMetricLoader,
   type WorkloadDescriptor,
   type WorkloadMetricLoader,
-} from "../src/react.js";
+} from "../src/react/index.js";
 
 afterEach(cleanup);
 
@@ -86,8 +86,8 @@ describe("WorkloadPanel", () => {
       .map((query) => query.queryKey);
     expect(keys).toEqual(
       expect.arrayContaining([
-        ["timeseries", "load", "plugin-ui-sdk/workload/a/cpu/usage", "1h"],
-        ["timeseries", "load", "plugin-ui-sdk/workload/b/cpu/usage", "1h"],
+        ["timeseries", "load", "mission-control-sdk/workload/a/cpu/usage", "1h"],
+        ["timeseries", "load", "mission-control-sdk/workload/b/cpu/usage", "1h"],
       ]),
     );
   });

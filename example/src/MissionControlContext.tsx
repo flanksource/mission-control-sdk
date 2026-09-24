@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import {
-  createMissionControlPluginClient,
+  createMissionControlClient,
   type ConnectionMode,
-  type MissionControlPluginClient,
-} from '@flanksource/plugin-ui-sdk';
+  type MissionControlClient,
+} from '@flanksource/mission-control-sdk';
 
 type MissionControlProviderProps = {
   mode: ConnectionMode;
@@ -11,11 +11,11 @@ type MissionControlProviderProps = {
   children: React.ReactNode;
 };
 
-const MissionControlContext = createContext<MissionControlPluginClient | null>(null);
+const MissionControlContext = createContext<MissionControlClient | null>(null);
 
 export function MissionControlProvider({ mode, baseUrl, children }: MissionControlProviderProps) {
   const client = useMemo(
-    () => createMissionControlPluginClient({ mode, baseUrl }),
+    () => createMissionControlClient({ mode, baseUrl }),
     [mode, baseUrl],
   );
 
@@ -26,7 +26,7 @@ export function MissionControlProvider({ mode, baseUrl, children }: MissionContr
   );
 }
 
-export function useMissionControl(): MissionControlPluginClient {
+export function useMissionControl(): MissionControlClient {
   const client = useContext(MissionControlContext);
   if (!client) {
     throw new Error('useMissionControl must be used inside MissionControlProvider');

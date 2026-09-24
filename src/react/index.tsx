@@ -19,11 +19,11 @@ import {
   type WorkloadCardWorkload,
 } from "@flanksource/clicky-ui/data";
 import type {
-  MissionControlPlaybooksClient,
   Playbook,
   PlaybookParameter,
   PlaybookRunResponse,
-} from "./index.js";
+  PlaybooksClient,
+} from "../playbooks/types.js";
 import {
   parameterDefaults,
   parameterSchema,
@@ -142,7 +142,7 @@ export type WorkloadPanelLogs = {
 };
 
 export type WorkloadPanelPlaybooks = {
-  client: MissionControlPlaybooksClient;
+  client: PlaybooksClient;
   configId?: string;
   onRunStarted?: (response: PlaybookRunResponse, playbook: Playbook) => void;
 };
@@ -269,10 +269,7 @@ function WorkloadPanelView({
     setValues(parameterDefaults(fallback));
 
     playbookClient
-      .parameters(
-        selectedPlaybook.id,
-        playbookConfigId ? { config_id: playbookConfigId } : {},
-      )
+      .parameters(selectedPlaybook.id, { configId: playbookConfigId })
       .then((resolved) => {
         if (
           cancelled ||
@@ -312,7 +309,7 @@ function WorkloadPanelView({
     playbookLoadingTarget.current = targetToken;
     setPlaybookState("loading");
     try {
-      const resolved = await playbookClient.list(playbookConfigId);
+      const resolved = await playbookClient.list({ configId: playbookConfigId });
       if (activeTargetToken.current !== targetToken) return;
       setAvailablePlaybooks(resolved);
       setPlaybookState("ready");
@@ -365,7 +362,7 @@ function WorkloadPanelView({
     try {
       const response = await playbookClient.run({
         id: selectedPlaybook.id,
-        ...(playbookConfigId ? { config_id: playbookConfigId } : {}),
+        configId: playbookConfigId,
         params: serializeParameters(parameters, values),
       });
       if (activeTargetToken.current !== targetToken) return;
@@ -562,7 +559,7 @@ function WorkloadPanelView({
 
 /**
  * Maps the panel's loader contract onto Clicky's function-backed series. Series
- * ids are `plugin-ui-sdk/workload/<workload id>/<metric>/<usage|capacity>`;
+ * ids are `mission-control-sdk/workload/<workload id>/<metric>/<usage|capacity>`;
  * Clicky caches loaded series by that id.
  */
 function toCardMetrics(
@@ -599,7 +596,7 @@ function loadedSeries(
   loader: WorkloadMetricLoader,
   scale: number,
 ): GaugeSeries {
-  const id = `plugin-ui-sdk/workload/${workload.id}/${name}/${part}`;
+  const id = `mission-control-sdk/workload/${workload.id}/${name}/${part}`;
   return {
     id,
     load: async ({ range, signal }) => {

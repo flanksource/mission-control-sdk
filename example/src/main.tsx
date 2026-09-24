@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { ConnectionMode } from '@flanksource/plugin-ui-sdk';
+import type { ConnectionMode } from '@flanksource/mission-control-sdk';
 import { Logs } from './Logs';
 import { MissionControlProvider } from './MissionControlContext';
 import './style.css';
@@ -23,9 +23,9 @@ function App() {
 
   return (
     <main>
-      <h1>Mission Control Plugin SDK Demo</h1>
+      <h1>Mission Control SDK Demo</h1>
       <p>
-        Calls the <code>{pluginRef}</code> plugin using <code>@flanksource/plugin-ui-sdk</code>.
+        Calls the <code>{pluginRef}</code> plugin using <code>@flanksource/mission-control-sdk</code>.
       </p>
 
       <section className="card">
