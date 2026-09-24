@@ -4,87 +4,57 @@ on:
   push:
     branches: [main]
 
-# Least-privilege default for the whole workflow; individual jobs opt in to the
-# additional scopes they need.
 permissions:
-  contents: read
+  contents: write
+  id-token: write
 
 jobs:
-  version-bump:
-    name: Bump Version
+  release:
+    name: Release and Publish
     runs-on: ubuntu-latest
-    # Pushes the version-bump commit and tag back to the repository.
-    permissions:
-      contents: write
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    outputs:
-      new_version: ${{ steps.bump.outputs.new_version }}
-      new_tag: ${{ steps.bump.outputs.new_tag }}
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.11.0
+      - name: Enable pnpm
+        run: corepack enable
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
+      - name: Bump patch version
         id: bump
         run: |
-          pnpm version patch --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
-
-          git add package.json
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
-          git tag "v$NEW_VERSION"
-          git push origin main
-          git push origin "v$NEW_VERSION"
-
-  build-and-publish:
-    name: Build and Publish
-    needs: version-bump
-    runs-on: ubuntu-latest
-    # id-token: write is required for npm provenance (OIDC); contents: read to
-    # check out the tagged commit.
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version-bump.outputs.new_tag }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.11.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          name=$(node -p "require('./package.json').name")
+          if versions=$(npm view "$name" versions --json); then
+            published=$(printf '%s' "$versions" | jq -r 'if type == "array" then .[] else . end' | sort -V | tail -1)
+            npm version "$published" --no-git-tag-version --allow-same-version >/dev/null
+            new_version=$(npm version patch --no-git-tag-version)
+          elif [ "$(printf '%s' "$versions" | jq -r '.error.code')" = "E404" ]; then
+            new_version="v$(node -p "require('./package.json').version")"
+          else
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/${new_version}"; then
+            echo "Tag ${new_version} already exists. Resolve the unpublished tag or bootstrap the package on npm before releasing."
+            exit 1
+          fi
+          echo "version=${new_version#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${new_version}" >> "$GITHUB_OUTPUT"
 
       - name: Type-check
         run: pnpm check
@@ -96,23 +66,24 @@ jobs:
         run: pnpm build
 
       - name: Publish to npm
-        run: pnpm publish --access public --provenance --no-git-checks
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: pnpm publish --access public --no-git-checks
 
-  create-release:
-    name: Create GitHub Release
-    needs: version-bump
-    runs-on: ubuntu-latest
-    # Creates a GitHub Release for the new tag.
-    permissions:
-      contents: write
-    steps:
-      - name: Create Release
+      - name: Commit, tag, and push
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
         run: |
-          gh release create ${{ needs.version-bump.outputs.new_tag }} \
-            --repo ${{ github.repository }} \
-            --title "Release ${{ needs.version-bump.outputs.new_tag }}" \
-            --generate-notes
+          git add package.json
+          git commit --allow-empty -m "chore(release): ${VERSION}"
+          git tag "${TAG}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "${TAG}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: gh release create "${TAG}" --title "Release ${TAG}" --generate-notes
