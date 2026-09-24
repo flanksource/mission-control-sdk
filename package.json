@@ -39,7 +39,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.6"
+    "vitest": "^5.0.1"
   },
   "peerDependencies": {
     "@flanksource/clicky-ui": "^0.3.40",
