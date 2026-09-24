@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - "@flanksource/*"
+
+allowBuilds:
+  esbuild: true
