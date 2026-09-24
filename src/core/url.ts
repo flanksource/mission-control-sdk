@@ -2,9 +2,11 @@ import { MissionControlError } from "./errors.js";
 import type { QueryParams, QueryValue } from "./types.js";
 
 const FALLBACK_BASE_URL = "http://mission-control-sdk.local";
-const CONFIG_ID_QUERY_PARAM = "config_id";
 
-/** Builds a URL under baseUrl, returning a path when it resolves to the current origin. */
+/**
+ * Builds a URL under baseUrl, returning a path when it resolves to the current origin.
+ * Query keys are sent exactly as given; typed clients own any wire-name mapping.
+ */
 export function buildURL(baseUrl: string, path: string, query?: QueryParams): string {
   const url = new URL(joinURL(baseUrl, path), fallbackBaseURL());
   appendQuery(url.searchParams, query);
@@ -51,10 +53,9 @@ function appendQuery(searchParams: URLSearchParams, query?: QueryParams): void {
   if (!query) return;
 
   for (const [key, value] of Object.entries(query)) {
-    const queryKey = key === "configId" ? CONFIG_ID_QUERY_PARAM : key;
     for (const item of queryValues(value)) {
       if (item === null || item === undefined) continue;
-      searchParams.append(queryKey, String(item));
+      searchParams.append(key, String(item));
     }
   }
 }

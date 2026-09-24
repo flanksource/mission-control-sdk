@@ -101,7 +101,8 @@ await kubernetes.invoke("create-pod", {
 - Defaults to `POST /api/plugins/:pluginRef/invoke/:operation`.
 - `options.proxy: true` uses `/api/plugins/:pluginRef/proxy/:operation` instead; the HTTP method
   comes from `options.method`.
-- Sends `configId` as the `config_id` query parameter.
+- Sends the scoped `configId` as the `config_id` query parameter. It always wins over a
+  `config_id` in the operation's query, so a handle cannot be re-scoped per call.
 - Sends `{}` when no body is provided for methods that support a body.
 - For `GET`/`HEAD`, treats the second argument as query params.
 - JSON-encodes non-`BodyInit` bodies and sets `content-type: application/json`.
@@ -111,7 +112,7 @@ await kubernetes.invoke("list-pods", { namespace: "default", labelSelector: "app
   method: "GET",
   proxy: true,
 });
-// GET /api/plugins/kubernetes/proxy/list-pods?config_id=config-123&namespace=default&labelSelector=app%3Dweb
+// GET /api/plugins/kubernetes/proxy/list-pods?namespace=default&labelSelector=app%3Dweb&config_id=config-123
 ```
 
 ### `plugin.stream(operation, query?)`
@@ -137,7 +138,7 @@ Build plugin UIs as relocatable static apps:
 ## Other endpoints
 
 `mc.request(path, options?)` calls any endpoint under `baseUrl` with the client's credentials
-policy and returns the native `Response`. `query` is encoded into the URL; a non-`BodyInit` `body`
+policy and returns the native `Response`. `query` keys are sent exactly as given (no renaming); a non-`BodyInit` `body`
 is JSON-encoded. The method defaults to `GET`.
 
 ```ts

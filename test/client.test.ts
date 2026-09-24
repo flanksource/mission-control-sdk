@@ -49,4 +49,13 @@ describe("createMissionControlClient", () => {
     expect(init.body).toBe(JSON.stringify({ name: "ci" }));
     expect(new Headers(init.headers).get("content-type")).toBe("application/json");
   });
+
+  it("sends request() query keys exactly as given", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const mc = createMissionControlClient({ mode: "proxy", baseUrl: "/", fetch: fetchMock });
+
+    await mc.request("/some/endpoint", { query: { configId: "abc", config_id: "def" } });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/some/endpoint?configId=abc&config_id=def");
+  });
 });
