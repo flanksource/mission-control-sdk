@@ -2,7 +2,7 @@ import type {
   JsonSchemaObject,
   JsonSchemaProperty,
 } from "@flanksource/clicky-ui/components";
-import type { Playbook, PlaybookParameter } from "./index.js";
+import type { Playbook, PlaybookParameter } from "../playbooks/types.js";
 
 export function playbookLabel(playbook: Playbook): string {
   return playbook.title?.trim() || playbook.name;

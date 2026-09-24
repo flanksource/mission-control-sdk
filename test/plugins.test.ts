@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createMissionControlClient,
-  createMissionControlPluginClient,
-} from "../src/index.js";
+import { createMissionControlClient } from "../src/index.js";
 
 const originalWindow = globalThis.window;
 const originalFetch = globalThis.fetch;
@@ -16,15 +13,15 @@ afterEach(() => {
   if (originalEventSource !== undefined) vi.stubGlobal("EventSource", originalEventSource);
 });
 
-describe("createMissionControlPluginClient", () => {
+describe("mc.plugin", () => {
   it("creates plugin instances scoped to pluginRef and configId", () => {
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "proxy",
       baseUrl: "/api/mission-control",
       fetch: vi.fn(),
     });
 
-    const plugin = client.New("kubernetes", " config-123 ");
+    const plugin = client.plugin("kubernetes", { configId: " config-123 " });
 
     expect(plugin.pluginRef).toBe("kubernetes");
     expect(plugin.configId).toBe("config-123");
@@ -32,12 +29,12 @@ describe("createMissionControlPluginClient", () => {
 
   it("invokes plugin operations through /invoke by default", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "proxy",
       baseUrl: "/api/mission-control",
       fetch: fetchMock,
     });
-    const plugin = client.New("kubernetes", "config-123");
+    const plugin = client.plugin("kubernetes", { configId: "config-123" });
 
     await plugin.invoke("create-pod", {
       namespace: "default",
@@ -62,32 +59,32 @@ describe("createMissionControlPluginClient", () => {
 
   it("sends an empty params object when body is omitted", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "proxy",
       baseUrl: "/",
       fetch: fetchMock,
     });
 
-    await client.New("kubernetes").invoke("list-pods");
+    await client.plugin("kubernetes").invoke("list-pods");
 
     expect(fetchMock.mock.calls[0][0]).toBe("/api/plugins/kubernetes/invoke/list-pods");
     expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(JSON.stringify({}));
   });
 
   it("requires baseUrl", () => {
-    expect(() => createMissionControlPluginClient({ mode: "proxy", baseUrl: "" })).toThrow(
+    expect(() => createMissionControlClient({ mode: "proxy", baseUrl: "" })).toThrow(
       "baseUrl is required",
     );
   });
 
   it("uses /proxy and query params for GET requests", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "proxy",
       baseUrl: "/api/mission-control",
       fetch: fetchMock,
     });
-    const plugin = client.New("kubernetes", "config-123");
+    const plugin = client.plugin("kubernetes", { configId: "config-123" });
 
     await plugin.invoke("list-pods", {
       namespace: "default",
@@ -109,12 +106,12 @@ describe("createMissionControlPluginClient", () => {
 
   it("uses /proxy for body-capable methods when proxy is true", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "proxy",
       baseUrl: "/api/mission-control",
       fetch: fetchMock,
     });
-    const plugin = client.New("kubernetes", "config-123");
+    const plugin = client.plugin("kubernetes", { configId: "config-123" });
 
     await plugin.invoke("create-pod", {
       namespace: "default",
@@ -135,13 +132,13 @@ describe("createMissionControlPluginClient", () => {
 
   it("uses include credentials for pass-through mode", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "pass-through",
       baseUrl: "https://mc.example.com",
       fetch: fetchMock,
     });
 
-    await client.New("kubernetes-logs", "config-123").invoke("pods", { namespace: "default" });
+    await client.plugin("kubernetes-logs", { configId: "config-123" }).invoke("pods", { namespace: "default" });
 
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://mc.example.com/api/plugins/kubernetes-logs/invoke/pods?config_id=config-123",
@@ -158,32 +155,17 @@ describe("createMissionControlPluginClient", () => {
       this.url = url;
       this.options = options;
     });
-    const client = createMissionControlPluginClient({
+    const client = createMissionControlClient({
       mode: "pass-through",
       baseUrl: "https://mc.example.com",
       EventSource: eventSourceMock as unknown as typeof EventSource,
     });
 
-    client.New("kubernetes-logs", "config-123").stream("tail", { pod: "api" });
+    client.plugin("kubernetes-logs", { configId: "config-123" }).stream("tail", { pod: "api" });
 
     expect(eventSourceMock).toHaveBeenCalledWith(
       "https://mc.example.com/api/plugins/kubernetes-logs/proxy/tail?config_id=config-123&pod=api",
       { withCredentials: true },
-    );
-  });
-
-  it("exports createMissionControlClient as a plugin client alias", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}"));
-    const client = createMissionControlClient({
-      mode: "proxy",
-      baseUrl: "/api/mission-control",
-      fetch: fetchMock,
-    });
-
-    await client.New("kubernetes").invoke("list-pods");
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      "/api/mission-control/api/plugins/kubernetes/invoke/list-pods",
     );
   });
 });

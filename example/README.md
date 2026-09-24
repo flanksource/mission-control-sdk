@@ -1,6 +1,6 @@
-# Plugin SDK Demo
+# Mission Control SDK Demo
 
-Simple Vite + React app that uses `@flanksource/plugin-ui-sdk` to call the `kubernetes-logs` Mission Control plugin.
+Simple Vite + React app that uses `@flanksource/mission-control-sdk` to call the `kubernetes-logs` Mission Control plugin.
 
 ## Run
 

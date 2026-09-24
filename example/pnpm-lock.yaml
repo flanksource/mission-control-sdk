@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@flanksource/plugin-ui-sdk':
+      '@flanksource/mission-control-sdk':
         specifier: file:../
         version: file:..
       '@vitejs/plugin-react':
@@ -45,7 +45,7 @@ packages:
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
 
-  '@flanksource/plugin-ui-sdk@file:..':
+  '@flanksource/mission-control-sdk@file:..':
     resolution: {directory: .., type: directory}
     engines: {node: '>=20'}
 
@@ -385,7 +385,7 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@flanksource/plugin-ui-sdk@file:..': {}
+  '@flanksource/mission-control-sdk@file:..': {}
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:

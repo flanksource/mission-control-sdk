@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom'],
     },
     optimizeDeps: {
-      exclude: ['@flanksource/plugin-ui-sdk'],
+      exclude: ['@flanksource/mission-control-sdk'],
     },
     server: {
       port: 5173,

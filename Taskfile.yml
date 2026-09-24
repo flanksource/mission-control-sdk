@@ -23,7 +23,9 @@ tasks:
       - pnpm check
     sources:
       - src/**/*.ts
+      - src/**/*.tsx
       - test/**/*.ts
+      - test/**/*.tsx
       - package.json
       - tsconfig.json
 
@@ -34,7 +36,9 @@ tasks:
       - pnpm test
     sources:
       - src/**/*.ts
+      - src/**/*.tsx
       - test/**/*.ts
+      - test/**/*.tsx
       - package.json
       - tsconfig.json
 
@@ -45,6 +49,7 @@ tasks:
       - pnpm build
     sources:
       - src/**/*.ts
+      - src/**/*.tsx
       - package.json
       - tsconfig.json
     generates:

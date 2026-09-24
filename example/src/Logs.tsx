@@ -18,7 +18,7 @@ type PodRow = {
 }
 
 export function Logs() {
-  const pluginClient = useMissionControl()
+  const mc = useMissionControl()
   const [configId, setConfigId] = useState(defaultConfigId)
   const [namespace, setNamespace] = useState('default')
   const [pod, setPod] = useState('')
@@ -33,7 +33,7 @@ export function Logs() {
     setEvents([])
 
     try {
-      const res = await pluginClient.New(pluginRef, configId || undefined).invoke('list-pods')
+      const res = await mc.plugin(pluginRef, { configId: configId || undefined }).invoke('list-pods')
       const text = await res.text()
       const rows = JSON.parse(text) as PodRow[]
       setPods(rows)
@@ -56,7 +56,7 @@ export function Logs() {
     setEvents([])
 
     try {
-      const res = await pluginClient.New(pluginRef, configId || undefined).invoke('logs', {
+      const res = await mc.plugin(pluginRef, { configId: configId || undefined }).invoke('logs', {
         namespace,
         pod: pod || undefined,
         container: container || undefined,
@@ -80,7 +80,7 @@ export function Logs() {
     setResult({ status: 'idle' })
 
     try {
-      const source = pluginClient.New(pluginRef, configId || undefined).stream('logs', {
+      const source = mc.plugin(pluginRef, { configId: configId || undefined }).stream('logs', {
         namespace,
         pod: pod || undefined,
         container: container || undefined,
