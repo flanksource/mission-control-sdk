@@ -1,5 +1,10 @@
 minimumReleaseAgeExclude:
   - "@flanksource/*"
 
+overrides:
+  # Temporary: Rollup 4.63.5 has not yet reached the minimum release age.
+  # Remove this once it does, so dependency refreshes can use the latest release.
+  rollup: 4.63.4
+
 allowBuilds:
   esbuild: true
