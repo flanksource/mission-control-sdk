@@ -34,7 +34,11 @@ export function createEmbeddedPluginClient(options: PluginBrowserClientOptions):
     // Reading a cross-origin parent's location throws; token mode remains mandatory.
   }
   const configId = normalizeOptionalString(options.configId ?? params.get("config_id") ?? undefined);
-  const base = new URL(`/api/plugins/${encodeURIComponent(name)}/`, window.location.origin);
+  const pluginPath = `/api/plugins/${encodeURIComponent(name)}`;
+  // Keep the iframe's deployment mount for both raw fetch URLs and the typed operation transport.
+  const uiIndex = window.location.pathname.lastIndexOf(`${pluginPath}/ui/`);
+  const baseUrl = uiIndex < 0 ? "" : window.location.pathname.slice(0, uiIndex);
+  const base = new URL(`${baseUrl}${pluginPath}/`, window.location.origin);
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const lifetime = new AbortController();
   let authorization = new AbortController();
@@ -119,7 +123,7 @@ export function createEmbeddedPluginClient(options: PluginBrowserClientOptions):
     signal.throwIfAborted();
     if (mode === "cookie") return fetchImpl(input, { ...init, signal, credentials: "same-origin" });
 
-    const template = new Request(url, { ...init, signal, credentials: "omit", redirect: "error" });
+    const template = new Request(url, { ...init, signal, mode: "same-origin", credentials: "omit", redirect: "error" });
     let used = await waitForToken(0, signal);
     const retry = template.clone();
     try {
@@ -142,7 +146,7 @@ export function createEmbeddedPluginClient(options: PluginBrowserClientOptions):
     }
   };
 
-  const handle = createPluginHandle(createTransport({ mode: "proxy", baseUrl: "/", fetch: authenticatedFetch }), name, { configId });
+  const handle = createPluginHandle(createTransport({ mode: "proxy", baseUrl: baseUrl || "/", fetch: authenticatedFetch }), name, { configId });
   if (mode === "token") window.addEventListener("message", onMessage);
   window.parent.postMessage({ type: "mc.tab.ready" }, "*");
   if (mode === "token") requestTimer = setTimeout(requestToken, 5000);

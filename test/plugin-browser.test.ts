@@ -96,6 +96,48 @@ describe("embedded plugin authentication", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("overrides no-cors before constructing requests so authentication and JSON headers survive", async () => {
+    const host = frame();
+    const requests: Request[] = [];
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      requests.push(new Request(input, init));
+      return new Response(null, { status: requests.length === 1 ? 401 : 200 });
+    });
+    const plugin = client(fetch);
+    host.token("old");
+    const response = plugin.invoke("pods", { namespace: "payments" }, { mode: "no-cors" });
+    await vi.waitFor(() => expect(host.requests()).toHaveLength(1));
+    host.token("new");
+    expect((await response).status).toBe(200);
+    expect(requests.map(request => request.mode)).toEqual(["same-origin", "same-origin"]);
+    expect(requests.map(request => request.headers.get("X-Flanksource-Plugin-Invocation"))).toEqual(["old", "new"]);
+    expect(requests.map(request => request.headers.get("content-type"))).toEqual(["application/json", "application/json"]);
+  });
+
+  it.each(["token", "cookie"])("preserves a deployment prefix for invoke, raw fetch and SSE in %s mode", async mode => {
+    const host = frame(mode === "token" ? "token" : "", "https://mc.test");
+    host.window.location = new URL(`https://mc.test/mission-control/api/plugins/logs/ui/index.html?config_id=scope-a&embed=${mode}`);
+    const urls: string[] = [];
+    const fetch = vi.fn<typeof globalThis.fetch>(async input => {
+      urls.push(new URL(input instanceof Request ? input.url : input, "https://mc.test").href);
+      return new Response("data: prefixed\n\n", { headers: { "content-type": "text/event-stream" } });
+    });
+    const plugin = client(fetch);
+    if (mode === "token") host.token();
+    await plugin.invoke("pods");
+    await plugin.fetch("/proxy/raw");
+    const events = [];
+    for await (const event of plugin.stream("follow")) events.push(event);
+    expect(urls).toEqual([
+      "https://mc.test/mission-control/api/plugins/logs/invoke/pods?config_id=scope-a",
+      "https://mc.test/mission-control/api/plugins/logs/proxy/raw?config_id=scope-a",
+      "https://mc.test/mission-control/api/plugins/logs/proxy/follow?config_id=scope-a",
+    ]);
+    expect(events).toEqual([{ event: "message", data: "prefixed", id: "" }]);
+    await expect(plugin.fetch("https://mc.test/api/plugins/logs/proxy/raw")).rejects.toThrow("same-origin API");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("retries a 401 with a newer token and the same body, returning the second 401", async () => {
     const host = frame();
     const unauthorized = new Response("denied", { status: 401 });

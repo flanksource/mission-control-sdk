@@ -167,13 +167,16 @@ try {
 
 The browser client uses token mode for `embed=token` **or any cross-origin parent**, even when
 the flag is omitted or changed. Cookie mode (`credentials: "same-origin"`) is allowed only
-for a top-level page or a same-origin parent. In token mode it:
+for a top-level page or a same-origin parent. Deployment prefixes are inferred from the iframe
+URL: a UI served at `/mission-control/api/plugins/:name/ui/` makes all API calls under
+`/mission-control/api/plugins/:name/`. In token mode it:
 
 - Sends `mc.tab.ready`, accepts valid `mc.token` messages **only from `window.parent`**, and
   waits for a token before making requests. Tokens stay in memory only.
-- Forces `credentials: "omit"` and `X-Flanksource-Plugin-Invocation` on every request,
-  regardless of caller options. Requests stay within this plugin's same-origin API; redirects
-  are rejected in token mode to avoid leaking credentials.
+- Forces `mode: "same-origin"`, `credentials: "omit"`, and `X-Flanksource-Plugin-Invocation`
+  on every request, regardless of caller options. This prevents `no-cors` from stripping the
+  authentication header. Requests stay within this plugin's API; redirects are rejected in
+  token mode to avoid leaking credentials.
 - Leaves scheduled pre-expiry renewal to the host. If the token expires without replacement,
   it aborts active requests/streams and sends `mc.token.request`. New calls wait for a token.
   Unanswered requests are re-sent every five seconds; each token wait rejects with
