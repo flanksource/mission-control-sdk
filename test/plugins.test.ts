@@ -199,4 +199,16 @@ describe("mc.plugin", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe("/api/plugins/kubernetes/invoke/list-pods?config_id=c1");
   });
+
+  it("mints scoped UI tokens and rejects a missing config asynchronously", async () => {
+    const token = { token: "minted", expiresInSeconds: 300 };
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(token));
+    const client = createMissionControlClient({ mode: "proxy", baseUrl: "/", fetch: fetchMock });
+    await expect(client.plugin("logs", { configId: "scope-a" }).uiToken()).resolves.toEqual(token);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/plugins/logs/ui-token?config_id=scope-a");
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe("no-store");
+    await expect(client.plugin("logs").uiToken().catch(error => error.message))
+      .resolves.toContain("uiToken requires a configId");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

@@ -1,7 +1,7 @@
 export { createMissionControlClient, type MissionControlClient } from "./client.js";
 export { MissionControlError } from "./core/errors.js";
 export {
-  createPluginClient,
+  createEmbeddedPluginClient,
   type PluginBrowserClient,
   type PluginBrowserClientOptions,
 } from "./plugins/browser.js";

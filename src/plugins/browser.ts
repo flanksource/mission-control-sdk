@@ -22,10 +22,17 @@ export type PluginBrowserClient = Pick<PluginClient, "pluginRef" | "configId" | 
 };
 
 /** Owns iframe authentication in memory. Create once per plugin UI and dispose on teardown. */
-export function createPluginClient(options: PluginBrowserClientOptions): PluginBrowserClient {
+export function createEmbeddedPluginClient(options: PluginBrowserClientOptions): PluginBrowserClient {
   const name = requirePathSegment(options.name, "name");
   const params = new URLSearchParams(window.location.search);
-  const mode = params.get("embed") === "token" ? "token" : "cookie";
+  let mode: PluginBrowserClient["mode"] = "token";
+  // A cross-origin parent cannot opt into the user's Mission Control cookies by omitting a flag.
+  try {
+    if (params.get("embed") !== "token" &&
+        (window.parent === window || window.parent.location.origin === window.location.origin)) mode = "cookie";
+  } catch {
+    // Reading a cross-origin parent's location throws; token mode remains mandatory.
+  }
   const configId = normalizeOptionalString(options.configId ?? params.get("config_id") ?? undefined);
   const base = new URL(`/api/plugins/${encodeURIComponent(name)}/`, window.location.origin);
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -34,15 +41,20 @@ export function createPluginClient(options: PluginBrowserClientOptions): PluginB
   let token: string | undefined;
   let expiresAt = 0;
   let revision = 0;
-  let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+  let requestTimer: ReturnType<typeof setTimeout> | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let refreshRequested = false;
   const waiters = new Set<() => void>();
 
+  /** Retry unanswered requests, but deduplicate concurrent callers for five seconds. */
   function requestToken(): void {
     if (refreshRequested || lifetime.signal.aborted) return;
     refreshRequested = true;
     window.parent.postMessage({ type: "mc.token.request" }, "*");
+    requestTimer = setTimeout(() => {
+      refreshRequested = false;
+      if (!token || waiters.size) requestToken();
+    }, 5000);
   }
 
   function expire(): void {
@@ -58,24 +70,27 @@ export function createPluginClient(options: PluginBrowserClientOptions): PluginB
     if (typeof message.token !== "string" || !message.token.trim() ||
         typeof message.expiresInSeconds !== "number" || !Number.isFinite(message.expiresInSeconds) ||
         message.expiresInSeconds <= 0) return;
-    clearTimeout(renewalTimer);
+    clearTimeout(requestTimer);
     clearTimeout(expiryTimer);
     if (token && Date.now() >= expiresAt) expire();
     token = message.token;
     expiresAt = Date.now() + message.expiresInSeconds * 1000;
     revision++;
     refreshRequested = false;
-    // Very short TTLs still need a positive delay to avoid a tight host/iframe refresh loop.
-    const delay = message.expiresInSeconds > 30 ? message.expiresInSeconds - 30 : message.expiresInSeconds * 0.1;
-    renewalTimer = setTimeout(requestToken, delay * 1000);
-    expiryTimer = setTimeout(expire, message.expiresInSeconds * 1000);
+    // The host renews before expiry; the iframe asks only if that deadline is missed or a call gets 401.
+    expiryTimer = setTimeout(() => { expire(); requestToken(); }, message.expiresInSeconds * 1000);
     for (const wake of waiters) wake();
   }
 
-  /** A 401 must wait for a newer revision, even when an older token is still unexpired. */
+  /** Bound token waits so callers can show an error; a 401 still requires a newer revision. */
   function waitForToken(after: number, signal: AbortSignal): Promise<{ token: string; revision: number }> {
     return new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => {
+        cleanup();
+        reject(new MissionControlError("Timed out waiting for a plugin token"));
+      }, 30000);
       function cleanup(): void {
+        clearTimeout(deadline);
         waiters.delete(wake);
         signal.removeEventListener("abort", wake);
       }
@@ -104,7 +119,7 @@ export function createPluginClient(options: PluginBrowserClientOptions): PluginB
     signal.throwIfAborted();
     if (mode === "cookie") return fetchImpl(input, { ...init, signal, credentials: "same-origin" });
 
-    const template = new Request(input, { ...init, signal, credentials: "omit", redirect: "error" });
+    const template = new Request(url, { ...init, signal, credentials: "omit", redirect: "error" });
     let used = await waitForToken(0, signal);
     const retry = template.clone();
     try {
@@ -130,6 +145,7 @@ export function createPluginClient(options: PluginBrowserClientOptions): PluginB
   const handle = createPluginHandle(createTransport({ mode: "proxy", baseUrl: "/", fetch: authenticatedFetch }), name, { configId });
   if (mode === "token") window.addEventListener("message", onMessage);
   window.parent.postMessage({ type: "mc.tab.ready" }, "*");
+  if (mode === "token") requestTimer = setTimeout(requestToken, 5000);
 
   return {
     pluginRef: handle.pluginRef,
@@ -149,7 +165,7 @@ export function createPluginClient(options: PluginBrowserClientOptions): PluginB
     },
     dispose() {
       window.removeEventListener("message", onMessage);
-      clearTimeout(renewalTimer);
+      clearTimeout(requestTimer);
       clearTimeout(expiryTimer);
       token = undefined;
       lifetime.abort(new DOMException("Plugin client disposed", "AbortError"));

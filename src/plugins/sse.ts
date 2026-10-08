@@ -31,19 +31,13 @@ export async function* readPluginEvents(response: Response): AsyncGenerator<Plug
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
-      for (const character of chunk.value) {
-        if (skipLF && character === "\n") {
-          skipLF = false;
-          continue;
-        }
-        skipLF = false;
-        if (character !== "\r" && character !== "\n") {
-          buffer += character;
-          continue;
-        }
-        skipLF = character === "\r";
-        const line = buffer;
-        buffer = "";
+      if (!chunk.value) continue;
+      // Split whole decoded chunks; retain only the unfinished line and a cross-chunk CRLF boundary.
+      const text: string = buffer + (skipLF && chunk.value.startsWith("\n") ? chunk.value.slice(1) : chunk.value);
+      skipLF = text.endsWith("\r");
+      const lines = text.split(/\r\n|\r|\n/);
+      buffer = lines.pop()!;
+      for (const line of lines) {
         if (!line) {
           if (data.length) yield { event: event || "message", data: data.join("\n"), id };
           event = "";

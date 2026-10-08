@@ -32,7 +32,7 @@ export function createPluginClient(
     pluginRef: ref,
     configId,
 
-    uiToken(tokenOptions = {}): Promise<PluginUIToken> {
+    async uiToken(tokenOptions = {}): Promise<PluginUIToken> {
       if (!configId) throw new MissionControlError("uiToken requires a configId");
       return transport.json(`${PLUGIN_BASE_PATH}/${encodeURIComponent(ref)}/ui-token`, {
         ...tokenOptions,
