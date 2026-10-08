@@ -133,7 +133,103 @@ Build plugin UIs as relocatable static apps:
 
 - Use relative asset URLs. For Vite, set `base: "./"`.
 - Use hash routing for internal UI routes.
-- Use `plugin.invoke()` and `plugin.stream()` instead of hardcoding `/api/plugins/...` URLs.
+- Inside a plugin iframe, use `createPluginClient()` instead of hardcoding authentication or
+  `/api/plugins/...` URLs. The existing `mc.plugin()` handle is for host applications; it does
+  not participate in the iframe handshake, and its `stream()` still returns an `EventSource`.
+
+```ts
+import { createPluginClient } from "@flanksource/mission-control-sdk";
+
+const plugin = createPluginClient({ name: "kubernetes-logs" });
+// configId defaults to config_id in the iframe URL; it cannot be overridden by a call's query.
+const response = await plugin.invoke("list-pods", { namespace: "default" });
+const pods = await response.json();
+
+// Raw fetch paths are relative to /api/plugins/kubernetes-logs/.
+await plugin.fetch("/invoke/list-pods", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ namespace: "default" }),
+});
+
+const controller = new AbortController();
+try {
+  for await (const event of plugin.stream("tail-logs", { pod: "api-123" }, {
+    signal: controller.signal,
+  })) {
+    console.log(event.event, event.data, event.id);
+  }
+} catch (error) {
+  if (!controller.signal.aborted) throw error;
+}
+// On teardown: controller.abort() and plugin.dispose().
+```
+
+The browser client reads `embed=token` from the iframe URL. Without it, requests retain
+`credentials: "same-origin"` cookie authentication. In token mode it:
+
+- Sends `mc.tab.ready`, accepts valid `mc.token` messages **only from `window.parent`**, and
+  waits for a token before making requests. Tokens stay in memory only.
+- Forces `credentials: "omit"` and `X-Flanksource-Plugin-Invocation` on every request,
+  regardless of caller options. Requests stay within this plugin's same-origin API; redirects
+  are rejected in token mode to avoid leaking credentials.
+- Requests renewal with `mc.token.request` 30 seconds before expiry (for TTLs of 30 seconds or less,
+  after 10% of the TTL). Expiry without replacement aborts active requests/streams; new calls
+  wait for a token. Caller abort signals and `dispose()` also cancel waiting calls.
+- Cancels a 401 response, waits for a newer token, then retries **once** with the same body.
+  A second 401 and any 403 are returned directly. Disable additional retries in application
+  query libraries in token mode (`plugin.mode === "token"`).
+
+`stream()` uses authenticated fetch in both modes and yields `{ event, data, id }`. It handles
+UTF-8 chunks, LF/CRLF/CR delimiters, comments, named events, and multiline data. HTTP failures
+throw `MissionControlError` with `status`; non-SSE responses are rejected. It does not reconnect
+automatically: abort to cancel a pending read, or break the loop to close a received stream.
+
+### Third-party iframe hosts
+
+Use the framework-independent host helper on an iframe already attached to the document:
+
+```ts
+import { createPluginEmbed } from "@flanksource/mission-control-sdk";
+
+const embed = createPluginEmbed({
+  iframe: document.querySelector<HTMLIFrameElement>("#logs")!,
+  baseUrl: "https://mission-control.example.com",
+  name: "kubernetes-logs",
+  configId: "config-123",
+  async getToken(signal) {
+    const response = await fetch("/my-backend/logs-ui-token", { signal });
+    if (!response.ok) throw new Error(`Token refresh failed: ${response.status}`);
+    return response.json(); // { token, expiresInSeconds }
+  },
+  onError: error => console.error("Plugin token refresh failed", error),
+});
+
+// Before removing the iframe (or in a framework's unmount/effect cleanup):
+embed.dispose();
+```
+
+The helper sets `/api/plugins/:name/ui/?config_id=...&embed=token`, answers readiness and
+renewal requests only from that iframe and Mission Control origin, and posts tokens with that
+exact target origin, never `"*"`. It deduplicates concurrent refreshes, refreshes before expiry,
+and stops timers/listeners and aborts the supplied signal on disposal or iframe removal.
+A failed refresh calls `onError`; it never falls back to cookie authentication. Each iframe
+needs its own helper and plugin/config-scoped token. `baseUrl` must be browser-reachable
+Mission Control, not the host's backend proxy path.
+
+The host backend must mint the token **as its federated user**, not a service account. On an
+existing SDK connection to such a backend proxy, the endpoint is also available as:
+
+```ts
+const token = await mc.plugin("kubernetes-logs", { configId: "config-123" }).uiToken({ signal });
+// GET <baseUrl>/api/plugins/kubernetes-logs/ui-token?config_id=config-123
+// Returns { token, expiresInSeconds }; requests use cache: "no-store".
+```
+
+This follows the SDK's existing per-plugin handle rather than adding a separate `plugins`
+collection. `uiToken()` requires `configId`. The browser iframe client deliberately does not
+expose token minting. UI bundle authorization and federated RoleBinding configuration remain
+server-side concerns.
 
 ## Other endpoints
 
