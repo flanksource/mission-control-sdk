@@ -6,7 +6,7 @@ import {
   normalizeOptionalString,
   requirePathSegment,
 } from "../core/url.js";
-import type { PluginClient, PluginInvokeOptions, PluginOptions } from "./types.js";
+import type { PluginClient, PluginInvokeOptions, PluginOptions, PluginUIToken } from "./types.js";
 
 const PLUGIN_BASE_PATH = "/api/plugins";
 
@@ -31,6 +31,15 @@ export function createPluginClient(
   return {
     pluginRef: ref,
     configId,
+
+    async uiToken(tokenOptions = {}): Promise<PluginUIToken> {
+      if (!configId) throw new MissionControlError("uiToken requires a configId");
+      return transport.json(`${PLUGIN_BASE_PATH}/${encodeURIComponent(ref)}/ui-token`, {
+        ...tokenOptions,
+        query: { config_id: configId },
+        cache: "no-store",
+      });
+    },
 
     invoke(
       operation: string,

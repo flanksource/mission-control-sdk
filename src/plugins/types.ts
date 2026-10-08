@@ -12,10 +12,17 @@ export type PluginInvokeOptions = Omit<RequestInit, "body"> & {
   proxy?: boolean;
 };
 
+export type PluginUIToken = {
+  token: string;
+  expiresInSeconds: number;
+};
+
 /** A handle for one plugin, optionally scoped to a catalog config. */
 export type PluginClient = {
   pluginRef: string;
   configId?: string;
+  /** Mint a UI invocation token as the current user; requires a scoped configId. */
+  uiToken(options?: Pick<RequestInit, "signal">): Promise<PluginUIToken>;
   invoke(
     operation: string,
     bodyOrQueryParams?: unknown,
