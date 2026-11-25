@@ -2,11 +2,21 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - typescript/**
+      - .github/workflows/ci.yaml
   push:
     branches: [main]
+    paths:
+      - typescript/**
+      - .github/workflows/ci.yaml
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: typescript
 
 jobs:
   build:
@@ -24,6 +34,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -38,9 +49,9 @@ jobs:
         run: pnpm build
 
       - name: Install example dependencies
-        working-directory: example
+        working-directory: typescript/example
         run: pnpm install --frozen-lockfile
 
       - name: Build example
-        working-directory: example
+        working-directory: typescript/example
         run: pnpm build
