@@ -3,12 +3,19 @@ name: Release and Publish
 on:
   push:
     branches: [main]
+    paths:
+      - typescript/**
+      - .github/workflows/publish.yaml
 
 permissions:
   contents: write
   # Let pnpm request a short-lived GitHub OIDC token for npm trusted publishing
   # and provenance, instead of using a long-lived NPM_TOKEN secret.
   id-token: write
+
+defaults:
+  run:
+    working-directory: typescript
 
 jobs:
   release:
@@ -29,6 +36,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
