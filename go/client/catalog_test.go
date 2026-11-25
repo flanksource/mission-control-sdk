@@ -1,0 +1,307 @@
+// Tests the catalog calls against a fake Mission Control server.
+
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+
+	"github.com/flanksource/mission-control-sdk/go/clientapi"
+	"github.com/google/uuid"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = ginkgo.Describe("catalog client", func() {
+	ginkgo.It("posts a search request and decodes configs", func() {
+		var gotBody clientapi.SearchResourcesRequest
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodPost))
+			Expect(r.URL.Path).To(Equal("/resources/search"))
+			Expect(json.NewDecoder(r.Body).Decode(&gotBody)).To(Succeed())
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"configs":[{"id":"c1","name":"api","type":"Kubernetes::Pod"}]}`))
+		}))
+		defer server.Close()
+
+		resp, err := New(server.URL, "tok").SearchCatalog(context.Background(), clientapi.SearchResourcesRequest{Limit: 5})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(gotBody.Limit).To(Equal(5))
+		Expect(resp.Configs).To(HaveLen(1))
+		Expect(resp.Configs[0].Name).To(Equal("api"))
+	})
+
+	ginkgo.It("posts a config-scoped catalog changes request", func() {
+		var gotBody clientapi.CatalogChangesSearchRequest
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodPost))
+			Expect(r.URL.Path).To(Equal("/catalog/changes"))
+			Expect(json.NewDecoder(r.Body).Decode(&gotBody)).To(Succeed())
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"total":1,"changes":[{"id":"change-1","config_id":"config-1","name":"api","type":"Kubernetes::Deployment","change_type":"diff"}]}`))
+		}))
+		defer server.Close()
+
+		resp, err := New(server.URL, "tok").SearchCatalogChanges(context.Background(), clientapi.CatalogChangesSearchRequest{
+			BaseCatalogSearch: clientapi.BaseCatalogSearch{
+				CatalogID: "config-1",
+				Recursive: clientapi.CatalogChangeRecursiveDownstream,
+				Depth:     5,
+				Soft:      true,
+				PageSize:  25,
+			},
+		})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(gotBody.CatalogID).To(Equal("config-1"))
+		Expect(gotBody.Recursive).To(Equal(clientapi.CatalogChangeRecursiveDownstream))
+		Expect(gotBody.Depth).To(Equal(5))
+		Expect(gotBody.Soft).To(BeTrue())
+		Expect(gotBody.PageSize).To(Equal(25))
+		Expect(resp.Total).To(Equal(int64(1)))
+		Expect(resp.Changes).To(HaveLen(1))
+		Expect(resp.Changes[0].ConfigID).To(Equal("config-1"))
+	})
+
+	ginkgo.It("gets a single catalog item by id", func() {
+		id := "3a96d327-2a6b-4a3a-9b2a-1f0f6b6b6b6b"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodGet))
+			Expect(r.URL.Path).To(Equal("/resources/" + id))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"3a96d327-2a6b-4a3a-9b2a-1f0f6b6b6b6b","name":"my-config"}`))
+		}))
+		defer server.Close()
+
+		item, err := New(server.URL, "tok").GetCatalogItem(context.Background(), id)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(item.Name).ToNot(BeNil())
+		Expect(*item.Name).To(Equal("my-config"))
+	})
+
+	// Formatting the status into a message string discards it, which left IsNotFound blind to a
+	// 404 the server had been explicit about.
+	ginkgo.It("reports a 404 as not found and keeps the server's explanation", func() {
+		id := "3a96d327-2a6b-4a3a-9b2a-1f0f6b6b6b6b"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"config item not found"}`))
+		}))
+		defer server.Close()
+
+		_, err := New(server.URL, "tok").GetCatalogItem(context.Background(), id)
+
+		Expect(IsNotFound(err)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("config item not found"))
+	})
+
+	ginkgo.It("gets complete catalog items in bounded batches and preserves requested order", func() {
+		ids := make([]string, 201)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
+		}
+
+		var requestCount atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			Expect(r.Method).To(Equal(http.MethodGet))
+			Expect(r.URL.Path).To(Equal("/db/config_items"))
+			Expect(r.URL.Query().Get("select")).To(Equal("*"))
+
+			filter := strings.TrimSuffix(strings.TrimPrefix(r.URL.Query().Get("id"), "in.("), ")")
+			batchIDs := strings.Split(filter, ",")
+			Expect(len(batchIDs)).To(BeNumerically("<=", 100))
+			Expect(len(r.RequestURI)).To(BeNumerically("<", 8_000))
+			response := make([]map[string]any, 0, len(batchIDs))
+			for i := len(batchIDs) - 1; i >= 0; i-- {
+				item := map[string]any{
+					"id":           batchIDs[i],
+					"name":         "config-" + batchIDs[i],
+					"type":         "Kubernetes::Pod",
+					"config_class": "Pod",
+				}
+				if batchIDs[i] == ids[0] {
+					item["description"] = "full record"
+					item["config"] = map[string]any{"kind": "Pod"}
+					item["properties"] = []map[string]any{{"name": "namespace", "text": "production"}}
+				}
+				response = append(response, item)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			Expect(json.NewEncoder(w).Encode(response)).To(Succeed())
+		}))
+		defer server.Close()
+
+		items, err := New(server.URL, "tok").GetCatalogItems(context.Background(), ids)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(requestCount.Load()).To(Equal(int32(3)))
+		Expect(items).To(HaveLen(len(ids)))
+		for i := range ids {
+			Expect(items[i].ID.String()).To(Equal(ids[i]))
+		}
+		Expect(items[0].Description).ToNot(BeNil())
+		Expect(*items[0].Description).To(Equal("full record"))
+		Expect(items[0].Config).ToNot(BeNil())
+		Expect(*items[0].Config).To(MatchJSON(`{"kind":"Pod"}`))
+		Expect(items[0].Properties).ToNot(BeNil())
+	})
+
+	ginkgo.It("omits a requested full catalog item that is no longer visible", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer server.Close()
+
+		items, err := New(server.URL, "tok").GetCatalogItems(context.Background(), []string{"00000000-0000-0000-0000-000000000001"})
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(items).To(BeEmpty())
+	})
+
+	ginkgo.It("keeps catalog insight hydration requests below common proxy limits", func() {
+		ids := make([]string, catalogInsightBatchSize+1)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
+		}
+
+		var requestCount atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			Expect(r.Method).To(Equal(http.MethodGet))
+			Expect(r.URL.Path).To(Equal("/db/config_analysis"))
+			Expect(r.URL.Query().Get("select")).To(Equal(catalogInsightSearchDetailSelect))
+			filter := strings.TrimSuffix(strings.TrimPrefix(r.URL.Query().Get("id"), "in.("), ")")
+			Expect(len(strings.Split(filter, ","))).To(BeNumerically("<=", 100))
+			Expect(len(r.RequestURI)).To(BeNumerically("<", 8_000))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer server.Close()
+
+		insights, err := New(server.URL, "tok").GetCatalogInsights(context.Background(), ids)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(insights).To(BeEmpty())
+		Expect(requestCount.Load()).To(Equal(int32(2)))
+	})
+
+	ginkgo.It("gets full catalog change details from PostgREST", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodGet))
+			Expect(r.URL.Path).To(Equal("/db/config_changes"))
+			Expect(r.URL.Query().Get("id")).To(Equal("eq.521bae33-e4c3-42eb-a9c5-071ab92940b5"))
+			Expect(r.URL.Query().Get("select")).To(Equal(catalogChangeDetailSelect))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"521bae33-e4c3-42eb-a9c5-071ab92940b5","config_id":"21e7586d-31fb-453c-a205-d73dc6b58eaa","change_type":"Failed","created_at":"2026-06-24T16:41:38Z","source":"kubernetes/","details":{"reason":"Failed"},"config":{"id":"21e7586d-31fb-453c-a205-d73dc6b58eaa","name":"opensearch-fail","type":"MissionControl::Canary","config_class":"Canary"},"artifacts":[]}]`))
+		}))
+		defer server.Close()
+
+		change, err := New(server.URL, "tok").GetCatalogChange(context.Background(), "521bae33-e4c3-42eb-a9c5-071ab92940b5")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(change.ChangeType).To(Equal("Failed"))
+		Expect(change.Details).To(HaveKeyWithValue("reason", "Failed"))
+		Expect(change.Config).ToNot(BeNil())
+		Expect(change.Config.Name).To(Equal("opensearch-fail"))
+	})
+
+	ginkgo.It("gets full catalog insight details from PostgREST", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.Method).To(Equal(http.MethodGet))
+			Expect(r.URL.Path).To(Equal("/db/config_analysis"))
+			Expect(r.URL.Query().Get("id")).To(Equal("eq.521bae33-e4c3-42eb-a9c5-071ab92940b5"))
+			Expect(r.URL.Query().Get("select")).To(Equal(catalogInsightDetailSelect))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"521bae33-e4c3-42eb-a9c5-071ab92940b5","config_id":"21e7586d-31fb-453c-a205-d73dc6b58eaa","analyzer":"no-public-ip","message":"instance has public ip","summary":"public ip","status":"open","severity":"high","analysis_type":"security","analysis":{"rule":"R1"},"config":{"id":"21e7586d-31fb-453c-a205-d73dc6b58eaa","name":"prod-instance","type":"AWS::EC2::Instance","config_class":"EC2"}}]`))
+		}))
+		defer server.Close()
+
+		insight, err := New(server.URL, "tok").GetCatalogInsight(context.Background(), "521bae33-e4c3-42eb-a9c5-071ab92940b5")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(insight.Analyzer).To(Equal("no-public-ip"))
+		Expect(insight.Analysis).To(HaveKeyWithValue("rule", "R1"))
+		Expect(insight.Config).ToNot(BeNil())
+		Expect(insight.Config.Name).To(Equal("prod-instance"))
+	})
+
+	ginkgo.It("rejects malformed catalog IDs before issuing requests", func() {
+		var requestCount atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			requestCount.Add(1)
+		}))
+		defer server.Close()
+
+		first := "521bae33-e4c3-42eb-a9c5-071ab92940b5"
+		second := "21e7586d-31fb-453c-a205-d73dc6b58eaa"
+		_, err := New(server.URL, "tok").GetCatalogInsights(context.Background(), []string{first + "," + second})
+		Expect(err).To(MatchError(ContainSubstring("invalid catalog id")))
+
+		_, err = New(server.URL, "tok").GetCatalogItem(context.Background(), "../health")
+		Expect(err).To(MatchError(ContainSubstring("invalid catalog id")))
+		Expect(requestCount.Load()).To(BeZero())
+	})
+
+	ginkgo.It("returns not found for an empty catalog change response", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer server.Close()
+
+		_, err := New(server.URL, "tok").GetCatalogChange(context.Background(), uuid.NewString())
+		Expect(errors.Is(err, ErrNotFound)).To(BeTrue())
+	})
+
+	ginkgo.It("fetches relationships and exposes both tree directions", func() {
+		id := uuid.NewString()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Expect(r.URL.Path).To(Equal("/catalog/" + id + "/relationships"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"00000000-0000-0000-0000-000000000000","outgoing":{"id":"00000000-0000-0000-0000-000000000000","name":"root"}}`))
+		}))
+		defer server.Close()
+
+		rels, err := New(server.URL, "tok").GetCatalogRelationships(context.Background(), id)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rels.Outgoing).ToNot(BeNil())
+		Expect(rels.Outgoing.Name).ToNot(BeNil())
+		Expect(*rels.Outgoing.Name).To(Equal("root"))
+	})
+
+	ginkgo.It("returns typed server errors for catalog failures", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":"PGRST100","error":"bad filter","trace":"trace-1"}`))
+		}))
+		defer server.Close()
+
+		_, err := New(server.URL, "tok").SearchCatalog(context.Background(), clientapi.SearchResourcesRequest{})
+
+		var serverErr *ServerError
+		Expect(errors.As(err, &serverErr)).To(BeTrue(), "got: %v", err)
+		Expect(serverErr.StatusCode).To(Equal(http.StatusBadRequest))
+		Expect(serverErr.Code).To(Equal("PGRST100"))
+		Expect(serverErr.Message).To(Equal("bad filter"))
+		Expect(serverErr.Trace).To(Equal("trace-1"))
+	})
+
+	ginkgo.It("returns ErrHTMLResponse when the frontend answers a catalog search", func() {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<!DOCTYPE html><html></html>"))
+		}))
+		defer server.Close()
+
+		_, err := New(server.URL, "tok").SearchCatalog(context.Background(), clientapi.SearchResourcesRequest{})
+		Expect(err).To(MatchError(ErrHTMLResponse))
+	})
+})
