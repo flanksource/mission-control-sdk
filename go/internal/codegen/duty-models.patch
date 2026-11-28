@@ -1,0 +1,50 @@
+# duty's column types travel as plain Go values on the wire.
+@@
+@@
+-import "github.com/lib/pq"
+
+-pq.StringArray
++[]string
+
+@@
+@@
+-import "github.com/flanksource/duty/types"
++import "github.com/flanksource/duty/types"
+
+-types.JSONStringMap
++map[string]string
+
+@@
+@@
+-import "github.com/flanksource/duty/types"
++import "github.com/flanksource/duty/types"
+
+-types.JSONMap
++map[string]any
+
+@@
+@@
+-import "github.com/flanksource/duty/types"
++import "github.com/flanksource/duty/types"
++import "encoding/json"
+
+-types.JSON
++json.RawMessage
+
+# Properties is generated under the SDK's name; see duty-types.patch.
+@@
+@@
+-import "github.com/flanksource/duty/types"
++import "github.com/flanksource/duty/types"
+
+-types.Properties
++CatalogProperties
+
+# Everything else from duty's types package is generated into this package.
+@@
+var x identifier
+@@
+-import "github.com/flanksource/duty/types"
+
+-types.x
++x
