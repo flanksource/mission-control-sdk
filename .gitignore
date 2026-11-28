@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .task/
+.bin/
 coverage/
 *.tsbuildinfo
 .DS_Store

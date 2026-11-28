@@ -1,0 +1,42 @@
+# duty's array column type travels as a plain slice on the wire.
+@@
+@@
+-import "github.com/lib/pq"
+
+-pq.StringArray
++[]string
+
+# duty's property types keep the SDK's Catalog names: clientapi already has a Property, for
+# plugin schemas.
+@@
+@@
+-type Text struct {
++type CatalogText struct {
+   ...
+ }
+
+@@
+@@
+-type Link struct {
++type CatalogLink struct {
+   ...
+-  Text `json:",inline"`
++  CatalogText `json:",inline"`
+ }
+
+@@
+@@
+-type Property struct {
++type CatalogProperty struct {
+   ...
+ }
+
+@@
+@@
+-type Properties []*Property
++type CatalogProperties []*CatalogProperty
+
+@@
+@@
+-[]Link
++[]CatalogLink

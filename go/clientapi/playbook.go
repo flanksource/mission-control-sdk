@@ -50,37 +50,8 @@ type PlaybookSpecSummary struct {
 	Actions     []map[string]json.RawMessage `json:"actions,omitempty"`
 }
 
-type Playbook struct {
-	ID          uuid.UUID       `json:"id"`
-	Namespace   string          `json:"namespace"`
-	Name        string          `json:"name"`
-	Title       string          `json:"title"`
-	Icon        string          `json:"icon,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Spec        json.RawMessage `json:"spec"`
-	Source      string          `json:"source"`
-	Category    string          `json:"category"`
-	CreatedBy   *uuid.UUID      `json:"created_by,omitempty"`
-	CreatedAt   time.Time       `json:"created_at,omitempty"`
-	UpdatedAt   time.Time       `json:"updated_at,omitempty"`
-	DeletedAt   *time.Time      `json:"deleted_at,omitempty"`
-}
-
-type PlaybookRunStatus string
-
-const (
-	PlaybookRunStatusCancelled       PlaybookRunStatus = "cancelled"
-	PlaybookRunStatusTimedOut        PlaybookRunStatus = "timed_out"
-	PlaybookRunStatusCompleted       PlaybookRunStatus = "completed"
-	PlaybookRunStatusFailed          PlaybookRunStatus = "failed"
-	PlaybookRunStatusPendingApproval PlaybookRunStatus = "pending_approval"
-	PlaybookRunStatusRunning         PlaybookRunStatus = "running"
-	PlaybookRunStatusScheduled       PlaybookRunStatus = "scheduled"
-	PlaybookRunStatusSleeping        PlaybookRunStatus = "sleeping"
-	PlaybookRunStatusRetrying        PlaybookRunStatus = "retrying"
-	PlaybookRunStatusWaiting         PlaybookRunStatus = "waiting"
-)
-
+// Final reports whether a run in this status will not change again. Playbook, PlaybookRun,
+// PlaybookRunAction and their status enums are generated from duty.
 func (s PlaybookRunStatus) Final() bool {
 	switch s {
 	case PlaybookRunStatusCancelled, PlaybookRunStatusCompleted, PlaybookRunStatusFailed, PlaybookRunStatusTimedOut:
@@ -88,45 +59,6 @@ func (s PlaybookRunStatus) Final() bool {
 	default:
 		return false
 	}
-}
-
-type PlaybookRun struct {
-	ID                 uuid.UUID         `json:"id"`
-	PlaybookID         uuid.UUID         `json:"playbook_id"`
-	Status             PlaybookRunStatus `json:"status,omitempty"`
-	Spec               json.RawMessage   `json:"spec"`
-	CreatedAt          time.Time         `json:"created_at,omitempty"`
-	StartTime          *time.Time        `json:"start_time,omitempty"`
-	ScheduledTime      time.Time         `json:"scheduled_time,omitempty"`
-	EndTime            *time.Time        `json:"end_time,omitempty"`
-	Timeout            time.Duration     `json:"timeout,omitempty"`
-	CreatedBy          *uuid.UUID        `json:"created_by,omitempty"`
-	ComponentID        *uuid.UUID        `json:"component_id,omitempty"`
-	CheckID            *uuid.UUID        `json:"check_id,omitempty"`
-	ConfigID           *uuid.UUID        `json:"config_id,omitempty"`
-	Error              *string           `json:"error,omitempty"`
-	Parameters         map[string]string `json:"parameters,omitempty"`
-	Request            map[string]any    `json:"request,omitempty"`
-	AgentID            *uuid.UUID        `json:"agent_id,omitempty"`
-	ParentID           *uuid.UUID        `json:"parent_id,omitempty"`
-	NotificationSendID *uuid.UUID        `json:"notification_send_id,omitempty"`
-}
-
-type PlaybookActionStatus string
-
-type PlaybookRunAction struct {
-	ID            uuid.UUID            `json:"id"`
-	Name          string               `json:"name"`
-	PlaybookRunID uuid.UUID            `json:"playbook_run_id"`
-	Status        PlaybookActionStatus `json:"status,omitempty"`
-	ScheduledTime time.Time            `json:"scheduled_time,omitempty"`
-	StartTime     time.Time            `json:"start_time,omitempty"`
-	EndTime       *time.Time           `json:"end_time,omitempty"`
-	Result        map[string]any       `json:"result,omitempty"`
-	Error         *string              `json:"error,omitempty"`
-	IsPushed      bool                 `json:"is_pushed"`
-	AgentID       *uuid.UUID           `json:"agent_id,omitempty"`
-	RetryCount    int                  `json:"attempt,omitempty"`
 }
 
 type PlaybookSummary struct {

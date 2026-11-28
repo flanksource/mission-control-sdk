@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - go/**
+      - Taskfile.yaml
       - .github/workflows/go.yaml
   push:
     branches: [main]
     paths:
       - go/**
+      - Taskfile.yaml
       - .github/workflows/go.yaml
 
 permissions:
@@ -31,6 +33,17 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
+
+      - name: Setup Task
+        uses: arduino/setup-task@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # zz_generated.duty_models.go is copied from duty and rewritten with gopatch; a
+      # hand edit or a duty bump without regenerating would ship types nobody can rebuild.
+      - name: Check generated code
+        working-directory: .
+        run: task go:generate:check
 
       - name: Vet
         run: go vet ./...

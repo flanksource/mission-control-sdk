@@ -1,0 +1,76 @@
+version: "3"
+
+vars:
+  # The duty release clientapi's generated wire types are copied from.
+  DUTY_VERSION: v1.0.1431
+  # flanksource/gopatch publishes no tags and its go.mod keeps the upstream module path, so
+  # `go run …@version` cannot fetch it; it is built from this commit instead. Later commits
+  # link commons-db's sqlite driver twice and panic at startup.
+  GOPATCH_COMMIT: d84be0d86e92918a4cb105f831895a54293d7c64
+  GOPATCH: "{{.ROOT_DIR}}/.bin/gopatch"
+  GENERATED_TYPES: clientapi/zz_generated.duty_types.go
+  GENERATED_QUERY: clientapi/zz_generated.duty_query.go
+  GENERATED_MODELS: clientapi/zz_generated.duty_models.go
+
+tasks:
+  tools:gopatch:
+    desc: Build the pinned flanksource/gopatch into .bin
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - rm -rf .bin/gopatch-src
+      - git clone --quiet https://github.com/flanksource/gopatch .bin/gopatch-src
+      - git -C .bin/gopatch-src checkout --quiet {{.GOPATCH_COMMIT}}
+      - cd .bin/gopatch-src && GOWORK=off go build -o ../gopatch .
+      - echo {{.GOPATCH_COMMIT}} > .bin/gopatch.commit
+      - rm -rf .bin/gopatch-src
+    status:
+      - test -x .bin/gopatch
+      - test "$(cat .bin/gopatch.commit)" = "{{.GOPATCH_COMMIT}}"
+
+  go:generate:
+    desc: Regenerate every generated file in the Go module
+    cmds:
+      - task: go:generate:models
+
+  go:generate:models:
+    desc: Copy duty's wire types into clientapi and rewrite them onto SDK types
+    dir: go
+    deps: [tools:gopatch]
+    vars:
+      DUTY_DIR:
+        sh: cd {{.ROOT_DIR}}/go && GOWORK=off GOFLAGS=-mod=mod go mod download -json github.com/flanksource/duty@{{.DUTY_VERSION}} | jq -er .Dir
+      CODEGEN: GOWORK=off go run ./internal/codegen -package clientapi -source github.com/flanksource/duty@{{.DUTY_VERSION}}
+    cmds:
+      # duty/types: selectors, catalog properties, env var references and check metrics.
+      - >-
+        {{.CODEGEN}} -dir {{.DUTY_DIR}}/types -out {{.GENERATED_TYPES}}
+        -files resource_selector.go,match_expression.go,common.go,properties.go,envvar.go,uptime.go,latency.go
+        -types ResourceSelector,MatchExpression,Items,Text,Link,Property,Properties,EnvVar,EnvVarSource,SecretKeySelector,HelmRefKeySelector,ConfigMapKeySelector,LocalObjectReference,Uptime,Latency
+      # duty/query: resource search and change search.
+      - >-
+        {{.CODEGEN}} -dir {{.DUTY_DIR}}/query -out {{.GENERATED_QUERY}}
+        -files resource_selector.go,catalog_search.go,config_changes.go
+        -types SearchResourcesRequest,SearchResourcesResponse,SelectedResource,BaseCatalogSearch,ChangeRelationDirection,CatalogChangesSearchRequest,ConfigChangeRow
+      # duty/models: config items and their records, playbooks, connections, canaries and checks.
+      - >-
+        {{.CODEGEN}} -dir {{.DUTY_DIR}}/models -out {{.GENERATED_MODELS}}
+        -files config.go,common.go,artifacts.go,playbooks.go,connections.go,canary.go,checks.go
+        -types AnalysisType,RelatedConfigDirection,ConfigLocation,ConfigItem,ConfigItemLastScrapedTime,ConfigScraper,ConfigRelationship,ConfigChange,ConfigAnalysis,ExternalID,ConfigItemSummary,Severity,Health,Artifact,Playbook,PlaybookRun,PlaybookRunAction,PlaybookRunStatus,PlaybookActionStatus,Connection,Canary,Check,CheckStatus,CheckHealthStatus
+        -consts ConfigStatusDeleted,AnalysisStatusOpen
+      - "{{.GOPATCH}} patch -p internal/codegen/duty-types.patch {{.GENERATED_TYPES}}"
+      - "{{.GOPATCH}} patch -p internal/codegen/duty-models.patch {{.GENERATED_QUERY}} {{.GENERATED_MODELS}}"
+      # The API returns ConfigItem's cost columns, which duty's model does not declare.
+      - "{{.GOPATCH}} add field ConfigItem.CostPerMinute float64 --tag 'json:\"cost_per_minute,omitempty\"' {{.GENERATED_MODELS}}"
+      - "{{.GOPATCH}} add field ConfigItem.CostTotal1d float64 --tag 'json:\"cost_total_1d,omitempty\"' {{.GENERATED_MODELS}}"
+      - "{{.GOPATCH}} add field ConfigItem.CostTotal7d float64 --tag 'json:\"cost_total_7d,omitempty\"' {{.GENERATED_MODELS}}"
+      - "{{.GOPATCH}} add field ConfigItem.CostTotal30d float64 --tag 'json:\"cost_total_30d,omitempty\"' {{.GENERATED_MODELS}}"
+      # A connection being created has no timestamps yet; duty would send them as year one.
+      - "{{.GOPATCH}} edit field Connection.CreatedAt --tag 'json:\"created_at,omitempty,omitzero\"' {{.GENERATED_MODELS}}"
+      - "{{.GOPATCH}} edit field Connection.UpdatedAt --tag 'json:\"updated_at,omitempty,omitzero\"' {{.GENERATED_MODELS}}"
+
+  go:generate:check:
+    desc: Fail when the generated Go code differs from what is committed
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - task: go:generate
+      - git diff --exit-code -- go/
